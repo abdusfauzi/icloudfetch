@@ -1,9 +1,12 @@
 from pyicloud import PyiCloudService
 import os
+import platform
+import subprocess
 import hashlib
 import time
 import keyring
 import logging
+import pytz
 from tqdm import tqdm
 from datetime import datetime, timezone
 
@@ -34,14 +37,36 @@ def download_file_with_progress(photo, file_path, chunk_size=1024 * 1024):
 
     return hasher.hexdigest()
 
-# Function to reset file's created and modified timestamps
-def reset_file_timestamp(file_path, timestamp):
+def reset_file_timestamp(file_path, timestamp, timezone='UTC'):
     try:
-        mod_time = timestamp.timestamp()  # Convert to Unix timestamp
-        os.utime(file_path, (mod_time, mod_time))  # Set both access and modified times
-        logging.info(f"Set file timestamp for {file_path} to {timestamp}")
+        # Ensure timestamp is timezone-aware
+        if timestamp.tzinfo is None:
+            timestamp = pytz.UTC.localize(timestamp)
+        
+        # Convert to the desired timezone
+        local_tz = pytz.timezone(timezone)
+        local_timestamp = timestamp.astimezone(local_tz)
+
+        mod_time = local_timestamp.timestamp()  # Convert to Unix timestamp
+        os.utime(file_path, (mod_time, mod_time))  # Set access and modified times
+
+        # Set creation time (birth time)
+        if platform.system() == 'Darwin':  # macOS
+            # Format the date string as required by SetFile, in the local timezone
+            date_string = local_timestamp.strftime("%m/%d/%Y %H:%M:%S")
+            
+            # Set TZ environment variable for subprocess
+            env = os.environ.copy()
+            env['TZ'] = timezone
+
+            subprocess.run(['SetFile', '-d', date_string, file_path], check=True, env=env)
+        elif platform.system() == 'Windows':
+            from win32_setctime import setctime
+            setctime(file_path, mod_time)
+
+        # logging.info(f"Set all timestamps for {file_path} to {local_timestamp} ({timezone})")
     except Exception as e:
-        logging.error(f"Failed to set file timestamp for {file_path}: {e}")
+        logging.error(f"Failed to set timestamps for {file_path}: {e}")
 
 # Rate limiting variables
 RATE_LIMIT = 100  # Maximum number of requests
@@ -63,15 +88,18 @@ def authenticate():
             os.makedirs(session_dir)
         
         apple_id = input(f"Enter the email for Apple ID: ")
-
+        
         # Retrieve password securely using keyring
+        # keyring.delete_password("icloud", apple_id)
         password = keyring.get_password("icloud", apple_id)
-
+        
         if not password:
             password = input(f"Enter the password for {apple_id}: ")
             keyring.set_password("icloud", apple_id, password)
 
         icloud = PyiCloudService(apple_id, password, cookie_directory=session_dir)
+
+        logging.info("Checking for 2FA")
         
         if icloud.requires_2fa:
             logging.info("Two-factor authentication required.")
@@ -82,6 +110,8 @@ def authenticate():
             else:
                 logging.error("Failed to verify two-factor authentication code.")
                 exit()
+
+        logging.info("Checking for Trusted Session")
 
         if icloud.is_trusted_session:
             logging.info("Successfully authenticated.")
@@ -119,7 +149,8 @@ def save_last_downloaded(photo_name):
 icloud = authenticate()
 
 # Set the directory where you want to download the photos/videos
-download_directory = 'icloud_photos'
+# download_directory = 'icloud_photos'
+download_directory = '/Volumes/MZRGROUP/hazwani'
 os.makedirs(download_directory, exist_ok=True)
 
 # Filter photos based on the provided date range, or get all photos
@@ -154,7 +185,7 @@ for photo in photos:
             photo_path = os.path.join(download_directory, photo_name)
 
             # Log the file size
-            logging.info(f"Processing {photo_name} ({photo.size / (1024 * 1024):.2f} MB)")
+            # logging.info(f"Processing {photo_name} ({photo.size / (1024 * 1024):.2f} MB)")
 
             # Check if the file already exists and is identical
             if os.path.exists(photo_path):
@@ -165,7 +196,7 @@ for photo in photos:
                 if local_file_hash == icloud_file_hash:
                     logging.info(f"{photo_name} is already up-to-date, skipping download.")
                     # Reset the file's created/modified timestamps to the original photo timestamp
-                    reset_file_timestamp(photo_path, photo.created)
+                    reset_file_timestamp(photo_path, photo.added_date)
                     os.remove(temp_file_path)
                     break
                 else:
@@ -173,12 +204,12 @@ for photo in photos:
                     os.rename(temp_file_path, photo_path)
             else:
                 # Download the file with progress bar
-                logging.info(f"Downloading {photo_name} ({photo.asset_date})...")
+                # logging.info(f"Downloading {photo_name} ({photo.asset_date})...")
                 download_file_with_progress(photo, photo_path)
-                logging.info(f"Downloaded {photo_name} to {photo_path}.")
+                # logging.info(f"Downloaded {photo_name} to {photo_path}.")
 
             # Reset the file's created/modified timestamps to the original photo timestamp
-            reset_file_timestamp(photo_path, photo.created)
+            reset_file_timestamp(photo_path, photo.added_date)
 
             # Save the last downloaded photo name
             save_last_downloaded(photo_name)
