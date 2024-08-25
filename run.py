@@ -150,7 +150,7 @@ icloud = authenticate()
 
 # Set the directory where you want to download the photos/videos
 # download_directory = 'icloud_photos'
-download_directory = '/Volumes/MZRGROUP/hazwani'
+download_directory = 'downloaded_files'
 os.makedirs(download_directory, exist_ok=True)
 
 # Filter photos based on the provided date range, or get all photos

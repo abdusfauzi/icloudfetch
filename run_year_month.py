@@ -20,7 +20,7 @@ MAX_RETRIES = 5
 INITIAL_WAIT = 1  # Initial wait time in seconds
 MAX_WAIT = 60  # Maximum wait time in seconds
 TRACK_FILE = "last_downloaded.txt"
-BASE_DOWNLOAD_DIRECTORY = 'downloads'
+BASE_DOWNLOAD_DIRECTORY = 'downloaded_files'
 
 def calculate_file_hash(file_path, chunk_size=1024 * 1024):
     """Calculate the MD5 hash of a file."""
